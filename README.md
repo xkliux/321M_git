@@ -4,7 +4,7 @@
 pip install -r requirements.txt
 
 2. Run training:
-python Train.py
+python src/Train2.py
 
 3. Generate submission:
 zip submission.zip ...
