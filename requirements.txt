@@ -1,0 +1,5 @@
+torch
+sentence-transformers
+numpy
+pandas
+torch_measure
