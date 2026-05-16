@@ -1,14 +1,15 @@
 import json
 import os
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, TensorDataset
 from sentence_transformers import SentenceTransformer
 from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
 ######parameters start
@@ -70,16 +71,16 @@ def get_or_compute_embedding_map(name, ids, texts, encoder):
 
     ids = [str(x) for x in ids]
     texts = [str(x) for x in texts]
-    current_text_map = dict(zip(ids, texts))
+    current_text_map = dict(zip(ids, texts, strict=False))
 
     if emb_path.exists() and ids_path.exists():
         print(f"Loading cached {name} embeddings...")
         embeddings = np.load(emb_path)
 
-        with open(ids_path, "r", encoding="utf-8") as f:
+        with open(ids_path, encoding="utf-8") as f:
             cached_ids = json.load(f)
 
-        cached_map = dict(zip(cached_ids, embeddings))
+        cached_map = dict(zip(cached_ids, embeddings, strict=False))
 
         missing_ids = [x for x in ids if x not in cached_map]
 
@@ -93,7 +94,7 @@ def get_or_compute_embedding_map(name, ids, texts, encoder):
 
         missing_embeddings = encoder.encode(missing_texts,batch_size=ENCODE_BATCH_SIZE,show_progress_bar=True,normalize_embeddings=True,)
 
-        for x, emb in zip(missing_ids, missing_embeddings):
+        for x, emb in zip(missing_ids, missing_embeddings, strict=False):
             cached_map[x] = emb
 
         updated_ids = list(cached_map.keys())
@@ -114,7 +115,7 @@ def get_or_compute_embedding_map(name, ids, texts, encoder):
     with open(ids_path, "w", encoding="utf-8") as f:
         json.dump(ids, f)
 
-    return dict(zip(ids, embeddings))
+    return dict(zip(ids, embeddings, strict=False))
 
 
 def compute_or_load_idx(name, df, id_col):
@@ -123,7 +124,7 @@ def compute_or_load_idx(name, df, id_col):
     # Load mapping if exists
     if idx_path.exists():
         print(f"Loading cached {name}_to_idx...")
-        with open(idx_path, "r", encoding="utf-8") as f:
+        with open(idx_path, encoding="utf-8") as f:
             id_to_idx = json.load(f)
 
     # make mapping and save it ifn ot
@@ -239,7 +240,7 @@ def build_extra_features(df,global_mean,subject_mean,benchmark_mean,condition_me
                 c,
                 global_mean,
             )
-            for b, c in zip(df["benchmark"], df["condition"])
+            for b, c in zip(df["benchmark"], df["condition"], strict=False)
         ])
 
         features["subject_benchmark_prior"] = np.array([
@@ -249,7 +250,7 @@ def build_extra_features(df,global_mean,subject_mean,benchmark_mean,condition_me
                 b,
                 global_mean,
             )
-            for s, b in zip(df["subject_content"], df["benchmark"])
+            for s, b in zip(df["subject_content"], df["benchmark"], strict=False)
         ])
 
         features["subject_condition_prior"] = np.array([
@@ -259,7 +260,7 @@ def build_extra_features(df,global_mean,subject_mean,benchmark_mean,condition_me
                 c,
                 global_mean,
             )
-            for s, c in zip(df["subject_content"], df["condition"])
+            for s, c in zip(df["subject_content"], df["condition"], strict=False)
         ])
 
     # -------------------------#set output tensor
