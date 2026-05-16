@@ -24,11 +24,11 @@ CACHE_DIR = BASE_DIR / "embedding_cache"
 CACHE_DIR.mkdir(exist_ok=True)
 OUT_DIR = BASE_DIR / "submission"
 OUT_DIR.mkdir(exist_ok=True)
-LOAD_ONLY = None #integer or None
+LOAD_ONLY = None  # integer or None
 D_ID = 48
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-#ENCODER_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+# ENCODER_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 ENCODER_NAME = "sentence-transformers/all-mpnet-base-v2"
 
 MAX_ROWS = 6_000_000
@@ -41,19 +41,12 @@ patience = 3
 
 ##########helpers start
 
-#build second order priors
-def make_so_prior(df, col1, col2, label_col="label", sep="|||"):
-    pair_mean = (
-        df.groupby([col1, col2])[label_col]
-        .mean()
-        .apply(clip_prob)
-        .to_dict()
-    )
 
-    pair_mean_json = {
-        f"{k[0]}{sep}{k[1]}": v
-        for k, v in pair_mean.items()
-    }
+# build second order priors
+def make_so_prior(df, col1, col2, label_col="label", sep="|||"):
+    pair_mean = df.groupby([col1, col2])[label_col].mean().apply(clip_prob).to_dict()
+
+    pair_mean_json = {f"{k[0]}{sep}{k[1]}": v for k, v in pair_mean.items()}
 
     return pair_mean_json
 
@@ -62,8 +55,7 @@ def lookup_so_prior(pair_dict, a, b, global_mean, sep="|||"):
     return pair_dict.get(f"{a}{sep}{b}", global_mean)
 
 
-
-#load embedding if exist, make if not
+# load embedding if exist, make if not
 def get_or_compute_embedding_map(name, ids, texts, encoder):
     safe_encoder_name = ENCODER_NAME.replace("/", "_")
     emb_path = CACHE_DIR / f"{name}_{safe_encoder_name}.npy"
@@ -92,7 +84,12 @@ def get_or_compute_embedding_map(name, ids, texts, encoder):
 
         missing_texts = [current_text_map[x] for x in missing_ids]
 
-        missing_embeddings = encoder.encode(missing_texts,batch_size=ENCODE_BATCH_SIZE,show_progress_bar=True,normalize_embeddings=True,)
+        missing_embeddings = encoder.encode(
+            missing_texts,
+            batch_size=ENCODE_BATCH_SIZE,
+            show_progress_bar=True,
+            normalize_embeddings=True,
+        )
 
         for x, emb in zip(missing_ids, missing_embeddings, strict=False):
             cached_map[x] = emb
@@ -108,7 +105,12 @@ def get_or_compute_embedding_map(name, ids, texts, encoder):
         return {x: cached_map[x] for x in ids}
 
     print(f"Computing all {name} embeddings...")
-    embeddings = encoder.encode(texts,batch_size=ENCODE_BATCH_SIZE,show_progress_bar=True,normalize_embeddings=True,)
+    embeddings = encoder.encode(
+        texts,
+        batch_size=ENCODE_BATCH_SIZE,
+        show_progress_bar=True,
+        normalize_embeddings=True,
+    )
 
     np.save(emb_path, embeddings)
 
@@ -142,27 +144,45 @@ def compute_or_load_idx(name, df, id_col):
             json.dump(id_to_idx, f)
 
     # Map IDs to index, not found =  UNK
-    idx_series = (df[id_col].astype(str).map(lambda x: id_to_idx.get(x, id_to_idx["__UNK__"])))
+    idx_series = df[id_col].astype(str).map(lambda x: id_to_idx.get(x, id_to_idx["__UNK__"]))
 
     return id_to_idx, idx_series
 
-def build_extra_features(df,global_mean,subject_mean,benchmark_mean,condition_mean,item_mean,U=None,V=None, B=None,prior = True, gap = True, length = True, counts = True, similarity = True,interactions=True, so_priors=None,):
+
+def build_extra_features(
+    df,
+    global_mean,
+    subject_mean,
+    benchmark_mean,
+    condition_mean,
+    item_mean,
+    U=None,
+    V=None,
+    B=None,
+    prior=True,
+    gap=True,
+    length=True,
+    counts=True,
+    similarity=True,
+    interactions=True,
+    so_priors=None,
+):
     features = {}
     ##########prior prob
     if prior:
-        features["subject_prior"] = (df["subject_content"].map(subject_mean).fillna(global_mean).to_numpy())
+        features["subject_prior"] = df["subject_content"].map(subject_mean).fillna(global_mean).to_numpy()
 
-        features["benchmark_prior"] = (df["benchmark"].map(benchmark_mean).fillna(global_mean).to_numpy())
+        features["benchmark_prior"] = df["benchmark"].map(benchmark_mean).fillna(global_mean).to_numpy()
 
-        features["condition_prior"] = (df["condition"].map(condition_mean).fillna(global_mean).to_numpy())
+        features["condition_prior"] = df["condition"].map(condition_mean).fillna(global_mean).to_numpy()
 
         features["item_prior"] = df["item_content"].map(item_mean).fillna(global_mean).to_numpy()
 
     #######tensor diff
     if gap:
-        features["subject_minus_item"] = (features["subject_prior"] - features["item_prior"])
+        features["subject_minus_item"] = features["subject_prior"] - features["item_prior"]
 
-        features["subject_minus_benchmark"] = (features["subject_prior"] - features["benchmark_prior"])
+        features["subject_minus_benchmark"] = features["subject_prior"] - features["benchmark_prior"]
 
         ########feature lenght
     if length:
@@ -191,18 +211,17 @@ def build_extra_features(df,global_mean,subject_mean,benchmark_mean,condition_me
 
         features["item_count"] = (np.log1p(item_count) / np.log1p(item_count.max())).to_numpy()
 
-
     ######sim & interaction terms on wiht UVB
 
     if similarity:
         if U is not None and V is not None:
-            features["cos_subject_item"] = (F.cosine_similarity(U, V, dim=1).detach().cpu().numpy())
+            features["cos_subject_item"] = F.cosine_similarity(U, V, dim=1).detach().cpu().numpy()
 
         if U is not None and B is not None:
-            features["cos_subject_benchmark"] = (F.cosine_similarity(U, B, dim=1).detach().cpu().numpy())
+            features["cos_subject_benchmark"] = F.cosine_similarity(U, B, dim=1).detach().cpu().numpy()
 
         if V is not None and B is not None:
-            features["cos_item_benchmark"] = (F.cosine_similarity(V, B, dim=1).detach().cpu().numpy())
+            features["cos_item_benchmark"] = F.cosine_similarity(V, B, dim=1).detach().cpu().numpy()
 
     if interactions:
         if U is not None and V is not None:
@@ -233,43 +252,53 @@ def build_extra_features(df,global_mean,subject_mean,benchmark_mean,condition_me
             features["ub_diff_sum"] = ub_diff.sum(dim=1).detach().cpu().numpy()
 
     if so_priors is not None:
-        features["benchmark_condition_prior"] = np.array([
-            lookup_so_prior(
-                so_priors["benchmark_condition_prior"],
-                b,
-                c,
-                global_mean,
-            )
-            for b, c in zip(df["benchmark"], df["condition"], strict=False)
-        ])
+        features["benchmark_condition_prior"] = np.array(
+            [
+                lookup_so_prior(
+                    so_priors["benchmark_condition_prior"],
+                    b,
+                    c,
+                    global_mean,
+                )
+                for b, c in zip(df["benchmark"], df["condition"], strict=False)
+            ]
+        )
 
-        features["subject_benchmark_prior"] = np.array([
-            lookup_so_prior(
-                so_priors["subject_benchmark_prior"],
-                s,
-                b,
-                global_mean,
-            )
-            for s, b in zip(df["subject_content"], df["benchmark"], strict=False)
-        ])
+        features["subject_benchmark_prior"] = np.array(
+            [
+                lookup_so_prior(
+                    so_priors["subject_benchmark_prior"],
+                    s,
+                    b,
+                    global_mean,
+                )
+                for s, b in zip(df["subject_content"], df["benchmark"], strict=False)
+            ]
+        )
 
-        features["subject_condition_prior"] = np.array([
-            lookup_so_prior(
-                so_priors["subject_condition_prior"],
-                s,
-                c,
-                global_mean,
-            )
-            for s, c in zip(df["subject_content"], df["condition"], strict=False)
-        ])
+        features["subject_condition_prior"] = np.array(
+            [
+                lookup_so_prior(
+                    so_priors["subject_condition_prior"],
+                    s,
+                    c,
+                    global_mean,
+                )
+                for s, c in zip(df["subject_content"], df["condition"], strict=False)
+            ]
+        )
 
     # -------------------------#set output tensor
 
     feature_names = list(features.keys())
 
-    X_extra = torch.tensor(np.column_stack([features[name] for name in feature_names]),dtype=torch.float32,)
+    X_extra = torch.tensor(
+        np.column_stack([features[name] for name in feature_names]),
+        dtype=torch.float32,
+    )
 
     return X_extra, feature_names
+
 
 def get_probs_labels(model, loader):
     model.eval()
@@ -289,7 +318,24 @@ def get_probs_labels(model, loader):
 
     return np.array(probs_all), np.array(labels_all)
 
-def save_training_artifacts(out_dir,encoder_name,U,X_text,X_extra,extra_feature_names,d_id,subject_to_idx,item_to_idx,subject_mean,benchmark_mean,condition_mean,item_mean,so_priors,global_mean,):
+
+def save_training_artifacts(
+    out_dir,
+    encoder_name,
+    U,
+    X_text,
+    X_extra,
+    extra_feature_names,
+    d_id,
+    subject_to_idx,
+    item_to_idx,
+    subject_mean,
+    benchmark_mean,
+    condition_mean,
+    item_mean,
+    so_priors,
+    global_mean,
+):
     config = {
         "encoder_name": encoder_name,
         "embedding_dim": int(U.shape[1]),
@@ -336,8 +382,10 @@ def save_training_artifacts(out_dir,encoder_name,U,X_text,X_extra,extra_feature_
     print("Saved config and lookup artifacts.")
     print(config)
 
+
 def clip_prob(x):
     return max(0.01, min(0.99, float(x)))
+
 
 def compute_accuracy(model, loader):
     model.eval()
@@ -359,9 +407,11 @@ def compute_accuracy(model, loader):
 
     return correct / total
 
+
 ##########helpers end
 
 ###########Model NCF
+
 
 class NCF(nn.Module):
     def __init__(self, d_text, d_extra):
@@ -393,9 +443,10 @@ class NCF(nn.Module):
         x = torch.cat([text_x, extra], dim=1)
         return self.net(x).squeeze(-1)
 
+
 ###########Model NCF
 
-#load training data parquets
+# load training data parquets
 
 print("Loading official train shards...")
 
@@ -404,11 +455,11 @@ train_files = sorted(TRAIN_DIR.glob("*.parquet"))
 if not train_files:
     raise FileNotFoundError(f"No train parquet files found in {TRAIN_DIR}")
 
-#load from local
+# load from local
 dfs = []
 
 if LOAD_ONLY is not None:
-    train_files=train_files[:LOAD_ONLY]
+    train_files = train_files[:LOAD_ONLY]
 
 for f in train_files:
     print("Loading:", f.name)
@@ -439,7 +490,7 @@ print("Train columns:", df.columns.tolist())
 
 ##end training data loadiong
 
-#load meta data for items, subjects and benchmarks
+# load meta data for items, subjects and benchmarks
 
 print("Loading metadata...")
 
@@ -451,7 +502,7 @@ print("Items columns:", items.columns.tolist())
 print("Subjects columns:", subjects.columns.tolist())
 print("Benchmarks columns:", benchmarks.columns.tolist())
 
-#end load meta data for items, subjects and benchmarks
+# end load meta data for items, subjects and benchmarks
 
 
 ####set loaded meta data into column as text to be embedded
@@ -468,8 +519,8 @@ subjects["subject_content"] = (
     + subjects["params"].fillna("").astype(str)
     + " "
     + subjects["release_date"].fillna("").astype(str)
-
-    + " " + subjects["notes"].fillna("").astype(str)
+    + " "
+    + subjects["notes"].fillna("").astype(str)
 )
 benchmarks["benchmark"] = benchmarks["name"].fillna("").astype(str)
 ####end set loaded meta data into column as text to be embedded
@@ -478,16 +529,28 @@ benchmarks["benchmark"] = benchmarks["name"].fillna("").astype(str)
 
 print("Merging metadata into train rows...")
 
-df = df.merge(items[["item_id", "item_content"]],on="item_id",how="left",)
+df = df.merge(
+    items[["item_id", "item_content"]],
+    on="item_id",
+    how="left",
+)
 
-df = df.merge(subjects[["subject_id", "subject_content"]],on="subject_id",how="left",)
+df = df.merge(
+    subjects[["subject_id", "subject_content"]],
+    on="subject_id",
+    how="left",
+)
 
-df = df.merge(benchmarks[["benchmark_id", "benchmark"]],on="benchmark_id",how="left",)
+df = df.merge(
+    benchmarks[["benchmark_id", "benchmark"]],
+    on="benchmark_id",
+    how="left",
+)
 
 ######### end merge meta data and train data into big table
 
 #####  data clean up and rename
-df = df.rename(columns={"test_condition": "condition","response": "label"})
+df = df.rename(columns={"test_condition": "condition", "response": "label"})
 
 
 df["condition"] = df["condition"].fillna("none").astype(str)
@@ -501,7 +564,9 @@ df = df.dropna(subset=["label"])
 # Binary  label
 df["label"] = (df["label"] > 0.5).astype(float)
 
-df = df[(df["item_content"].str.len() > 0)& (df["subject_content"].str.len() > 0)& (df["benchmark"].str.len() > 0)].copy()
+df = df[
+    (df["item_content"].str.len() > 0) & (df["subject_content"].str.len() > 0) & (df["benchmark"].str.len() > 0)
+].copy()
 
 print("Merged data shape:", df.shape)
 print(df[["subject_content", "item_content", "benchmark", "condition", "label"]].head())
@@ -523,11 +588,11 @@ print("Training rows:", len(df))
 
 global_mean = clip_prob(df["label"].mean())
 
-subject_mean = (df.groupby("subject_content")["label"].mean().apply(clip_prob).to_dict())
+subject_mean = df.groupby("subject_content")["label"].mean().apply(clip_prob).to_dict()
 # subject_mean = (df.groupby("subject_id")["label"].mean().apply(clip_prob).to_dict())
-benchmark_mean = (df.groupby("benchmark")["label"].mean().apply(clip_prob).to_dict())
+benchmark_mean = df.groupby("benchmark")["label"].mean().apply(clip_prob).to_dict()
 
-condition_mean = (df.groupby("condition")["label"].mean().apply(clip_prob).to_dict())
+condition_mean = df.groupby("condition")["label"].mean().apply(clip_prob).to_dict()
 
 item_mean = df.groupby("item_content")["label"].mean().apply(clip_prob).to_dict()
 # item_mean = df.groupby("item_id")["label"].mean().apply(clip_prob).to_dict()
@@ -562,35 +627,54 @@ print("Loading encoder...")
 encoder = SentenceTransformer(ENCODER_NAME)
 
 print("Preparing unique subjects...")
-subject_table = (df[["subject_id", "subject_content"]].astype(str).drop_duplicates(subset=["subject_id"]).sort_values("subject_id"))
+subject_table = (
+    df[["subject_id", "subject_content"]].astype(str).drop_duplicates(subset=["subject_id"]).sort_values("subject_id")
+)
 
 subject_ids = subject_table["subject_id"].tolist()
 subject_texts = subject_table["subject_content"].tolist()
 
-subject_map = get_or_compute_embedding_map("subjects",subject_ids,subject_texts,encoder,)
+subject_map = get_or_compute_embedding_map(
+    "subjects",
+    subject_ids,
+    subject_texts,
+    encoder,
+)
 
 print("Preparing unique items...")
-item_table = (df[["item_id", "item_content"]].astype(str).drop_duplicates(subset=["item_id"]).sort_values("item_id"))
+item_table = df[["item_id", "item_content"]].astype(str).drop_duplicates(subset=["item_id"]).sort_values("item_id")
 
 item_ids = item_table["item_id"].tolist()
 item_texts = item_table["item_content"].tolist()
 
-item_map = get_or_compute_embedding_map("items",item_ids,item_texts,encoder,)
+item_map = get_or_compute_embedding_map(
+    "items",
+    item_ids,
+    item_texts,
+    encoder,
+)
 
 print("Preparing unique benchmarks...")
-benchmark_table = (df[["benchmark_id", "benchmark"]].astype(str).drop_duplicates(subset=["benchmark_id"]).sort_values("benchmark_id"))
+benchmark_table = (
+    df[["benchmark_id", "benchmark"]].astype(str).drop_duplicates(subset=["benchmark_id"]).sort_values("benchmark_id")
+)
 
 benchmark_ids = benchmark_table["benchmark_id"].tolist()
 benchmark_texts = benchmark_table["benchmark"].tolist()
 
-benchmark_map = get_or_compute_embedding_map("benchmarks",benchmark_ids,benchmark_texts,encoder,)
+benchmark_map = get_or_compute_embedding_map(
+    "benchmarks",
+    benchmark_ids,
+    benchmark_texts,
+    encoder,
+)
 
 ##############id embeddings
 
 
-subject_to_idx, df["subject_idx"] = compute_or_load_idx("subject",df,"subject_id")
+subject_to_idx, df["subject_idx"] = compute_or_load_idx("subject", df, "subject_id")
 
-item_to_idx, df["item_idx"] = compute_or_load_idx("item",df,"item_id")
+item_to_idx, df["item_idx"] = compute_or_load_idx("item", df, "item_id")
 
 num_subjects = len(subject_to_idx)
 num_items = len(item_to_idx)
@@ -598,18 +682,43 @@ num_items = len(item_to_idx)
 ##############id embeddings
 
 
+# x_extra features with helper
 
-#x_extra features with helper
+U = torch.tensor(
+    np.stack([subject_map[str(x)] for x in df["subject_id"]]),
+    dtype=torch.float32,
+)
 
-U = torch.tensor(np.stack([subject_map[str(x)] for x in df["subject_id"]]),dtype=torch.float32,)
+V = torch.tensor(
+    np.stack([item_map[str(x)] for x in df["item_id"]]),
+    dtype=torch.float32,
+)
 
-V = torch.tensor(np.stack([item_map[str(x)] for x in df["item_id"]]),dtype=torch.float32,)
-
-B = torch.tensor(np.stack([benchmark_map[str(x)] for x in df["benchmark_id"]]),dtype=torch.float32,)
+B = torch.tensor(
+    np.stack([benchmark_map[str(x)] for x in df["benchmark_id"]]),
+    dtype=torch.float32,
+)
 
 X_text = torch.cat([U, V, B], dim=1)
 
-X_extra, extra_feature_names= build_extra_features(df,global_mean,subject_mean,benchmark_mean,condition_mean,item_mean,U=U,V=V, B=B,prior = True, gap = True, length = False, counts = False, similarity = True, interactions=False, so_priors=None,)
+X_extra, extra_feature_names = build_extra_features(
+    df,
+    global_mean,
+    subject_mean,
+    benchmark_mean,
+    condition_mean,
+    item_mean,
+    U=U,
+    V=V,
+    B=B,
+    prior=True,
+    gap=True,
+    length=False,
+    counts=False,
+    similarity=True,
+    interactions=False,
+    so_priors=None,
+)
 print(X_extra.shape)
 print(extra_feature_names)
 
@@ -632,10 +741,10 @@ print("y shape:", y.shape)
 print("y min/max:", y.min().item(), y.max().item())
 
 
-#train test split
+# train test split
 
 
-#prevent leaks
+# prevent leaks
 unique_items = df["item_content"].drop_duplicates()
 
 train_items, val_items = train_test_split(
@@ -663,9 +772,17 @@ val_ds = TensorDataset(
     y[val_idx],
 )
 
-train_loader = DataLoader(train_ds,batch_size=BATCH_SIZE,shuffle=True,)
+train_loader = DataLoader(
+    train_ds,
+    batch_size=BATCH_SIZE,
+    shuffle=True,
+)
 
-val_loader = DataLoader(val_ds,batch_size=2048,shuffle=False,)
+val_loader = DataLoader(
+    val_ds,
+    batch_size=2048,
+    shuffle=False,
+)
 
 
 ####model trainning
@@ -675,13 +792,17 @@ model = NCF(
     d_extra=X_extra.shape[1],
 ).to(DEVICE)
 
-optimizer = torch.optim.AdamW(model.parameters(),lr=3e-4,weight_decay=3e-3,)
+optimizer = torch.optim.AdamW(
+    model.parameters(),
+    lr=3e-4,
+    weight_decay=3e-3,
+)
 
 loss_fn = nn.BCEWithLogitsLoss()
 
 best_val_loss = float("inf")
 
-bad_epochs=0
+bad_epochs = 0
 
 for epoch in range(EPOCHS):
     model.train()
@@ -731,7 +852,7 @@ for epoch in range(EPOCHS):
         f"val_acc={val_acc:.4f}"
     )
 
-    #threshold tuning
+    # threshold tuning
     val_probs, val_labels = get_probs_labels(model, val_loader)
 
     best_acc = 0
@@ -749,7 +870,6 @@ for epoch in range(EPOCHS):
     print("best val acc:", best_acc)
     # threshold tuning
 
-
     if val_loss < best_val_loss:
         best_val_loss = val_loss
         torch.save(model.state_dict(), OUT_DIR / "ncf_head.pt")
@@ -760,7 +880,6 @@ for epoch in range(EPOCHS):
         if bad_epochs >= patience:
             print("Early stopping.")
             break
-
 
 
 ##save config for submission
@@ -786,4 +905,3 @@ save_training_artifacts(
 print("Done.")
 print("Best validation loss:", best_val_loss)
 print("Saved files to:", OUT_DIR.resolve())
-
